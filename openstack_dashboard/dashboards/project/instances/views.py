@@ -607,19 +607,23 @@ class ResizeView(workflows.WorkflowView):
             redirect = reverse("horizon:project:instances:index")
             msg = _('Unable to retrieve instance details.')
             exceptions.handle(self.request, msg, redirect=redirect)
-        flavor_id = instance.flavor['id']
-        flavors = self.get_flavors()
-        if flavor_id in flavors:
-            instance.flavor_name = flavors[flavor_id].name
+
+        flavor_id = instance.flavor.get('id')
+        if flavor_id:  # Nova API <=2.46
+            flavors = self.get_flavors()
+            if flavor_id in flavors:
+                instance.flavor_name = flavors[flavor_id].name
+            else:
+                try:
+                    flavor = api.nova.flavor_get(self.request, flavor_id)
+                    instance.flavor_name = flavor.name
+                except Exception:
+                    msg = _('Unable to retrieve flavor information '
+                            'for instance "%s".') % instance_id
+                    exceptions.handle(self.request, msg, ignore=True)
+                    instance.flavor_name = _("Not available")
         else:
-            try:
-                flavor = api.nova.flavor_get(self.request, flavor_id)
-                instance.flavor_name = flavor.name
-            except Exception:
-                msg = _('Unable to retrieve flavor information for instance '
-                        '"%s".') % instance_id
-                exceptions.handle(self.request, msg, ignore=True)
-                instance.flavor_name = _("Not available")
+            instance.flavor_name = instance.flavor['original_name']
         return instance
 
     @memoized.memoized_method
@@ -640,7 +644,6 @@ class ResizeView(workflows.WorkflowView):
             initial.update(
                 {'instance_id': self.kwargs['instance_id'],
                  'name': getattr(_object, 'name', None),
-                 'old_flavor_id': _object.flavor['id'],
                  'old_flavor_name': getattr(_object, 'flavor_name', ''),
                  'flavors': self.get_flavors()})
         return initial
